@@ -1,0 +1,850 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Dashboard - {{ company.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .metric-card {
+        background: white;
+        border-radius: 8px;
+        padding: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        transition: transform 0.2s;
+        position: relative;
+    }
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .metric-value {
+        font-size: 2rem;
+        font-weight: bold;
+        margin: 0.5rem 0;
+    }
+    .metric-label {
+        color: #666;
+        font-size: 0.875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .metric-sublabel {
+        color: #888;
+        font-size: 0.75rem;
+        margin-top: 0.25rem;
+    }
+    .positive {
+        color: #10b981;
+    }
+    .negative {
+        color: #ef4444;
+    }
+    .chart-container {
+        background: white;
+        border-radius: 8px;
+        padding: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        margin-top: 2rem;
+        height: 450px;
+    }
+    .date-range-controls {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+    }
+    .date-range-controls .control-group {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+    .date-range-controls input[type="date"], .date-range-controls select {
+        padding: 0.5rem 1rem;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background: white;
+        font-size: 14px;
+    }
+    .date-range-controls button {
+        padding: 0.5rem 1rem;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background: white;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 14px;
+    }
+    .date-range-controls button:hover {
+        background: #f3f4f6;
+    }
+    .date-range-controls button.active {
+        background: #3b82f6;
+        color: white;
+        border-color: #3b82f6;
+    }
+    .user-switcher {
+        position: relative;
+        margin-left: auto;
+    }
+    .user-switcher select {
+        padding: 0.5rem 1rem;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background: white;
+        cursor: pointer;
+        min-width: 200px;
+    }
+    .viewing-as {
+        background: #fef3c7;
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        font-size: 0.875rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .revenue-type-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        margin-left: 0.5rem;
+    }
+    .badge-booked {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+    .badge-forecast {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    .loading {
+        opacity: 0.6;
+        pointer-events: none;
+    }
+    .loading::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 20px;
+        height: 20px;
+        margin: -10px 0 0 -10px;
+        border: 2px solid #3b82f6;
+        border-radius: 50%;
+        border-top-color: transparent;
+        animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+    .period-selector {
+        background: #f8fafc;
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        margin-bottom: 2rem;
+    }
+    .section-divider {
+        border-top: 2px solid #e2e8f0;
+        margin: 2rem 0;
+        padding-top: 2rem;
+    }
+    .error-message {
+        background: #fee2e2;
+        color: #dc2626;
+        padding: 1rem;
+        border-radius: 4px;
+        margin: 1rem 0;
+    }
+    .annual-summary {
+        background: #f0f9ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <!-- Header with User Switcher -->
+    <div class="flex justify-between items-center mb-8">
+        <div>
+            <h1 class="text-3xl font-bold">{{ company.name }} Dashboard</h1>
+            <p class="text-gray-600">Real-time agency metrics and insights</p>
+        </div>
+        
+        {% if user.is_superuser %}
+        <div class="user-switcher">
+            {% if request.session.viewing_as_user %}
+            <div class="viewing-as">
+                <span>Viewing as another user</span>
+                <a href="{% url 'agency:switch_back' %}" class="text-blue-600 hover:underline">Switch back to admin</a>
+            </div>
+            {% else %}
+            <select id="userSwitcher" onchange="switchUserView(this.value)" class="form-select">
+                <option value="">View as user...</option>
+                {% for profile in all_profiles %}
+                <option value="{{ profile.user.id }}">
+                    {{ profile.user.get_full_name|default:profile.user.username }}
+                    {% if profile.is_project_manager %}(PM){% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Annual Summary Section (Moved to top) -->
+    <div class="annual-summary" id="annualSummarySection">
+        <h2 class="text-xl font-bold mb-4">Annual Summary (<span id="annualYear">{{ current_year }}</span>)</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="annualMetrics">
+            <div class="bg-white p-4 rounded-lg shadow">
+                <div class="text-2xl font-bold text-blue-600" id="annualRevenue">${{ total_annual_revenue|floatformat:0 }}</div>
+                <div class="text-sm text-gray-600">Annual Revenue</div>
+                <div class="text-xs text-gray-500">
+                    <span class="text-blue-600" id="annualBookedRevenue">${{ annual_booked_revenue|floatformat:0 }}</span> booked, 
+                    <span class="text-yellow-600" id="annualForecastRevenue">${{ annual_forecast_revenue|floatformat:0 }}</span> forecast
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow">
+                <div class="text-2xl font-bold text-red-600" id="annualCosts">${{ total_annual_costs|floatformat:0 }}</div>
+                <div class="text-sm text-gray-600">Annual Operating Costs</div>
+                <div class="text-xs text-gray-500">
+                    <span id="annualPayrollCosts">$0</span> payroll,
+                    <span id="annualContractorCosts">$0</span> contractors,
+                    <span id="annualOtherCosts">$0</span> other
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow">
+                <div class="text-2xl font-bold {% if annual_profit > 0 %}text-green-600{% else %}text-red-600{% endif %}" id="annualProfit">
+                    ${{ annual_profit|floatformat:0 }}
+                </div>
+                <div class="text-sm text-gray-600">Annual Profit</div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow">
+                <div class="text-2xl font-bold {% if annual_profit > 0 %}text-green-600{% else %}text-red-600{% endif %}" id="annualMargin">
+                    {{ annual_profit_margin|floatformat:1 }}%
+                </div>
+                <div class="text-sm text-gray-600">Annual Profit Margin</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Enhanced Date Range Selector -->
+    <div class="period-selector">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-lg font-semibold text-gray-900">Select Time Period</h2>
+            <div class="text-sm text-gray-600">
+                <span id="currentSelection">Current Month</span>
+            </div>
+        </div>
+        
+        <div class="date-range-controls">
+            <div class="control-group">
+                <label class="text-sm font-medium text-gray-700">Quick Select:</label>
+                <button onclick="setDateRange('current_month')" class="range-btn active" data-range="current_month">Current Month</button>
+                <button onclick="setDateRange('last_month')" class="range-btn" data-range="last_month">Last Month</button>
+                <button onclick="setDateRange('ytd')" class="range-btn" data-range="ytd">YTD</button>
+                <button onclick="setDateRange('last_12')" class="range-btn" data-range="last_12">Last 12 Months</button>
+                <button onclick="setDateRange('annual')" class="range-btn" data-range="annual">Annual View</button>
+                <button onclick="setDateRange('custom')" class="range-btn" data-range="custom">Custom Range</button>
+            </div>
+            
+            <div class="control-group" id="customDateInputs" style="display:none;">
+                <label class="text-sm font-medium text-gray-700">From:</label>
+                <input type="date" id="startDate">
+                <label class="text-sm font-medium text-gray-700">To:</label>
+                <input type="date" id="endDate">
+                <button onclick="updateDashboard()" id="updateBtn" class="bg-blue-500 text-white hover:bg-blue-600">Update</button>
+            </div>
+            
+            <div class="control-group" id="aggregationControl">
+                <label class="text-sm font-medium text-gray-700">View:</label>
+                <select id="aggregationLevel" onchange="updateDashboard()">
+                    <option value="monthly">Monthly</option>
+                    <option value="quarterly">Quarterly</option>
+                    <option value="annual">Annual</option>
+                </select>
+            </div>
+            
+            <div class="control-group" id="yearSelector" style="display:none;">
+                <label class="text-sm font-medium text-gray-700">Year:</label>
+                <select id="yearSelect" onchange="updateDashboard()">
+                    <option value="2023">2023</option>
+                    <option value="2024">2024</option>
+                    <option value="2025" selected>2025</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Display -->
+    <div id="errorDisplay" class="error-message" style="display:none;">
+        <strong>Error:</strong> <span id="errorMessage"></span>
+    </div>
+
+    <!-- Dynamic Key Metrics Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8" id="dynamicMetrics">
+        <!-- Monthly Revenue -->
+        <div class="metric-card" id="monthlyRevenueCard">
+            <div class="metric-label">Revenue</div>
+            <div class="metric-value" id="dynamicRevenue">${{ current_revenue|floatformat:0|default:"0" }}</div>
+            <div class="text-sm text-gray-600">
+                <span class="revenue-type-badge badge-booked" id="bookedAmount">${{ current_revenue|floatformat:0 }} booked</span>
+                <div class="metric-sublabel" id="forecastAmount">$0 forecast</div>
+            </div>
+        </div>
+
+        <!-- Monthly Costs -->
+        <div class="metric-card" id="monthlyCostsCard">
+            <div class="metric-label">Operating Costs</div>
+            <div class="metric-value negative" id="dynamicCosts">${{ current_month_costs|floatformat:0|default:"0" }}</div>
+            <div class="text-sm text-gray-600">
+                <div class="metric-sublabel">Payroll: $<span id="payrollAmount">{{ payroll_costs|floatformat:0 }}</span></div>
+                <div class="metric-sublabel">Contractors: $<span id="contractorAmount">{{ contractor_costs|floatformat:0 }}</span></div>
+                <div class="metric-sublabel">Other: $<span id="otherCostsAmount">{{ other_costs|floatformat:0 }}</span></div>
+            </div>
+        </div>
+
+        <!-- Monthly Profit -->
+        <div class="metric-card" id="monthlyProfitCard">
+            <div class="metric-label">Profit</div>
+            <div class="metric-value" id="dynamicProfit">${{ monthly_profit|floatformat:0|default:"0" }}</div>
+            <div class="text-sm text-gray-600">
+                <div class="metric-sublabel">Margin: <span id="profitMargin">{{ monthly_profit_margin|floatformat:1 }}%</span></div>
+            </div>
+        </div>
+
+        <!-- Monthly Capacity -->
+        <div class="metric-card" id="monthlyCapacityCard">
+            <div class="metric-label">Team Capacity</div>
+            <div class="metric-value" id="dynamicCapacity">0 hrs</div>
+            <div class="text-sm text-gray-600">
+                <div class="metric-sublabel">Utilization: <span id="utilizationRate">0%</span></div>
+                <div class="metric-sublabel">Allocated: <span id="allocatedHours">0</span> hrs</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Business Overview -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div class="bg-white p-4 rounded-lg shadow">
+            <div class="text-2xl font-bold">{{ total_clients }}</div>
+            <div class="text-sm text-gray-600">Active Clients</div>
+        </div>
+        <div class="bg-white p-4 rounded-lg shadow">
+            <div class="text-2xl font-bold">{{ total_projects }}</div>
+            <div class="text-sm text-gray-600">Total Projects</div>
+            <div class="text-xs text-gray-500">
+                {{ booked_projects }} booked, {{ forecast_projects }} forecast
+            </div>
+        </div>
+        <div class="bg-white p-4 rounded-lg shadow">
+            <div class="text-2xl font-bold">{{ total_team_members }}</div>
+            <div class="text-sm text-gray-600">Team Members</div>
+        </div>
+        <div class="bg-white p-4 rounded-lg shadow">
+            <div class="text-2xl font-bold">$<span id="avgProjectValue">0</span></div>
+            <div class="text-sm text-gray-600">Avg Project Value</div>
+        </div>
+    </div>
+
+    <!-- Enhanced Revenue Chart -->
+    <div class="chart-container">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">Revenue & Operating Expenses</h2>
+            <div class="flex items-center gap-4 text-sm">
+                <div class="flex items-center gap-2">
+                    <div class="w-3 h-3 bg-blue-500 rounded"></div>
+                    <span>Total Revenue</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div class="w-3 h-3 bg-green-500 rounded"></div>
+                    <span>Booked Revenue</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div class="w-3 h-3 bg-yellow-500 rounded"></div>
+                    <span>Forecast Revenue</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div class="w-3 h-3 bg-red-500 rounded"></div>
+                    <span>Operating Expenses</span>
+                </div>
+            </div>
+        </div>
+        <canvas id="revenueChart" style="max-height: 350px;"></canvas>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <a href="{% url 'agency:projects_list' %}" class="bg-blue-600 text-white p-4 rounded-lg text-center hover:bg-blue-700 transition">
+            <div class="text-lg font-semibold">View Projects</div>
+            <div class="text-sm opacity-90">Manage active projects</div>
+        </a>
+        <a href="{% url 'agency:clients_list' %}" class="bg-green-600 text-white p-4 rounded-lg text-center hover:bg-green-700 transition">
+            <div class="text-lg font-semibold">View Clients</div>
+            <div class="text-sm opacity-90">Client relationships</div>
+        </a>
+        <a href="{% url 'agency:capacity_dashboard' %}" class="bg-purple-600 text-white p-4 rounded-lg text-center hover:bg-purple-700 transition">
+            <div class="text-lg font-semibold">Capacity Planning</div>
+            <div class="text-sm opacity-90">Team utilization</div>
+        </a>
+    </div>
+</div>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Dashboard Filtering System with Working Metrics
+console.log('[Dashboard] Initializing with metric updates...');
+
+// Global variables
+let revenueChart = null;
+let currentRange = 'current_month';
+let currentStartDate = null;
+let currentEndDate = null;
+
+// Initialize dashboard when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('[Dashboard] DOM loaded, initializing...');
+    initializeDashboard();
+});
+
+function initializeDashboard() {
+    // Set default to current month
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    
+    currentStartDate = monthStart;
+    currentEndDate = monthEnd;
+    
+    // Set initial date inputs
+    document.getElementById('startDate').value = formatDate(monthStart);
+    document.getElementById('endDate').value = formatDate(monthEnd);
+    
+    console.log('[Dashboard] Initial date range:', {
+        start: formatDate(monthStart),
+        end: formatDate(monthEnd)
+    });
+    
+    // Initialize the chart
+    initializeChart();
+    
+    // Don't update dashboard here - the chart data is already loaded server-side
+}
+
+function formatDate(date) {
+    return date.toISOString().split('T')[0];
+}
+
+function showError(message) {
+    const errorDiv = document.getElementById('errorDisplay');
+    const errorMsg = document.getElementById('errorMessage');
+    errorMsg.textContent = message;
+    errorDiv.style.display = 'block';
+    
+    setTimeout(() => {
+        errorDiv.style.display = 'none';
+    }, 5000);
+}
+
+function setDateRange(range) {
+    console.log('[Dashboard] Setting date range:', range);
+    
+    const now = new Date();
+    let startDate, endDate, label;
+    
+    // Update button states
+    document.querySelectorAll('.range-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelector(`[data-range="${range}"]`).classList.add('active');
+    
+    currentRange = range;
+    
+    switch(range) {
+        case 'current_month':
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            label = startDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            break;
+        case 'last_month':
+            startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            endDate = new Date(now.getFullYear(), now.getMonth(), 0);
+            label = startDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            break;
+        case 'ytd':
+            startDate = new Date(now.getFullYear(), 0, 1);
+            endDate = now;
+            label = `Year to Date ${now.getFullYear()}`;
+            break;
+        case 'last_12':
+            startDate = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+            endDate = now;
+            label = 'Last 12 Months';
+            break;
+        case 'custom':
+            document.getElementById('customDateInputs').style.display = 'flex';
+            document.getElementById('currentSelection').textContent = 'Custom Range';
+            return;
+    }
+    
+    if (range !== 'custom') {
+        document.getElementById('customDateInputs').style.display = 'none';
+        currentStartDate = startDate;
+        currentEndDate = endDate;
+        
+        document.getElementById('startDate').value = formatDate(startDate);
+        document.getElementById('endDate').value = formatDate(endDate);
+        document.getElementById('currentSelection').textContent = label;
+        
+        updateDashboard();
+    }
+}
+
+function updateDashboard() {
+    console.log('[Dashboard] Updating dashboard...');
+    
+    if (currentRange === 'custom') {
+        const startInput = document.getElementById('startDate').value;
+        const endInput = document.getElementById('endDate').value;
+        
+        if (!startInput || !endInput) {
+            showError('Please select both start and end dates');
+            return;
+        }
+        
+        currentStartDate = new Date(startInput);
+        currentEndDate = new Date(endInput);
+        
+        document.getElementById('currentSelection').textContent = 
+            `${currentStartDate.toLocaleDateString()} - ${currentEndDate.toLocaleDateString()}`;
+    }
+    
+    // Show loading state
+    document.querySelectorAll('.metric-card').forEach(card => {
+        card.style.opacity = '0.6';
+    });
+    
+    // Fetch both dashboard data and chart data
+    Promise.all([
+        fetchDashboardData(),
+        fetchChartData()
+    ]).then(() => {
+        console.log('[Dashboard] Update completed');
+        document.querySelectorAll('.metric-card').forEach(card => {
+            card.style.opacity = '1';
+        });
+    }).catch(error => {
+        console.error('[Dashboard] Update error:', error);
+        showError('Failed to update dashboard');
+        document.querySelectorAll('.metric-card').forEach(card => {
+            card.style.opacity = '1';
+        });
+    });
+}
+
+function fetchDashboardData() {
+    const params = new URLSearchParams({
+        start_date: formatDate(currentStartDate),
+        end_date: formatDate(currentEndDate),
+        aggregation: document.getElementById('aggregationLevel').value
+    });
+    
+    const url = `/agency/api/dashboard-data/?${params}`;
+    console.log('[Dashboard] Fetching metrics from:', url);
+    
+    return fetch(url, {
+        headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        console.log('[Dashboard] Metrics response:', response.status);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('[Dashboard] Metrics data:', data);
+        updateMetrics(data);
+    })
+    .catch(error => {
+        console.error('[Dashboard] Metrics error:', error);
+        // Don't throw, just log the error
+    });
+}
+
+function fetchChartData() {
+    const params = new URLSearchParams({
+        year: currentStartDate.getFullYear()
+    });
+    
+    const url = `/agency/api/revenue-chart/?${params}`;
+    console.log('[Dashboard] Fetching chart data from:', url);
+    
+    return fetch(url, {
+        headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('[Dashboard] Chart data:', data);
+        updateChart(data);
+    })
+    .catch(error => {
+        console.error('[Dashboard] Chart error:', error);
+    });
+}
+
+function updateMetrics(data) {
+    console.log('[Dashboard] Updating metrics with:', data);
+    
+    // Update revenue card
+    const revenueEl = document.getElementById('dynamicRevenue');
+    if (revenueEl) {
+        revenueEl.textContent = `$${Math.round(data.revenue || 0).toLocaleString()}`;
+    }
+    
+    // Update revenue breakdown
+    const bookedEl = document.getElementById('bookedAmount');
+    if (bookedEl) {
+        bookedEl.textContent = `$${Math.round(data.booked_revenue || 0).toLocaleString()} booked`;
+    }
+    
+    const forecastEl = document.getElementById('forecastAmount');
+    if (forecastEl) {
+        forecastEl.textContent = `$${Math.round(data.forecast_revenue || 0).toLocaleString()} forecast`;
+    }
+    
+    // Update costs card
+    const costsEl = document.getElementById('dynamicCosts');
+    if (costsEl) {
+        costsEl.textContent = `$${Math.round(data.costs || 0).toLocaleString()}`;
+    }
+    
+    // Update cost breakdown
+    const payrollEl = document.getElementById('payrollAmount');
+    if (payrollEl) {
+        payrollEl.textContent = Math.round(data.payroll_costs || 0).toLocaleString();
+    }
+    
+    const otherCostsEl = document.getElementById('otherCostsAmount');
+    if (otherCostsEl) {
+        const otherCosts = (data.contractor_costs || 0) + (data.other_costs || 0);
+        otherCostsEl.textContent = Math.round(otherCosts).toLocaleString();
+    }
+    
+    // Update profit card
+    const profitEl = document.getElementById('dynamicProfit');
+    if (profitEl) {
+        const profit = data.profit || 0;
+        profitEl.textContent = `$${Math.round(Math.abs(profit)).toLocaleString()}`;
+        profitEl.className = `metric-value ${profit >= 0 ? 'positive' : 'negative'}`;
+        if (profit < 0) {
+            profitEl.textContent = '-' + profitEl.textContent;
+        }
+    }
+    
+    // Update profit margin
+    const marginEl = document.getElementById('profitMargin');
+    if (marginEl) {
+        marginEl.textContent = `${(data.profit_margin || 0).toFixed(1)}%`;
+    }
+    
+    // Update capacity card
+    const capacityEl = document.getElementById('dynamicCapacity');
+    if (capacityEl) {
+        capacityEl.textContent = `${Math.round(data.capacity || 0).toLocaleString()} hrs`;
+    }
+    
+    // Update utilization
+    const utilizationEl = document.getElementById('utilizationRate');
+    if (utilizationEl) {
+        utilizationEl.textContent = `${(data.utilization_rate || 0).toFixed(1)}%`;
+    }
+    
+    const allocatedEl = document.getElementById('allocatedHours');
+    if (allocatedEl) {
+        allocatedEl.textContent = `${Math.round(data.allocated_hours || 0).toLocaleString()}`;
+    }
+    
+    // Update average project value
+    const avgValueEl = document.getElementById('avgProjectValue');
+    if (avgValueEl) {
+        avgValueEl.textContent = Math.round(data.avg_project_value || 0).toLocaleString();
+    }
+    
+    // Update metric labels based on period
+    const isMonthly = currentRange === 'current_month' || currentRange === 'last_month';
+    const periodText = isMonthly ? 'Monthly' : 'Period';
+    
+    document.querySelectorAll('.metric-label').forEach(label => {
+        const text = label.textContent;
+        if (text.includes('Revenue') || text.includes('Costs') || 
+            text.includes('Profit') || text.includes('Capacity')) {
+            label.textContent = text.replace(/^(Monthly|Period|Annual)/, periodText);
+        }
+    });
+}
+
+function initializeChart() {
+    const ctx = document.getElementById('revenueChart');
+    if (!ctx) return;
+    
+    revenueChart = new Chart(ctx.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: {{ months|default:"[]"|safe }},
+            datasets: [
+                {
+                    label: 'Total Revenue',
+                    data: {{ combined|default:"[]"|safe }},
+                    borderColor: 'rgb(59, 130, 246)',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    tension: 0.1,
+                    fill: false
+                },
+                {
+                    label: 'Booked Revenue',
+                    data: {{ booked|default:"[]"|safe }},
+                    borderColor: 'rgb(34, 197, 94)',
+                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                    tension: 0.1,
+                    fill: false
+                },
+                {
+                    label: 'Forecast Revenue',
+                    data: {{ forecast|default:"[]"|safe }},
+                    borderColor: 'rgb(234, 179, 8)',
+                    backgroundColor: 'rgba(234, 179, 8, 0.1)',
+                    tension: 0.1,
+                    fill: false
+                },
+                {
+                    label: 'Operating Expenses',
+                    data: {{ expenses|default:"[]"|safe }},
+                    borderColor: 'rgb(239, 68, 68)',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    tension: 0.1,
+                    fill: false
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) {
+                                label += ': ';
+                            }
+                            label += '$' + context.parsed.y.toLocaleString();
+                            return label;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function updateChart(data) {
+    if (!revenueChart || !data) return;
+    
+    console.log('[Dashboard] Updating chart with:', data);
+    
+    // Filter based on date range
+    let filteredData = filterChartDataByDateRange(data);
+    
+    revenueChart.data.labels = filteredData.labels;
+    revenueChart.data.datasets[0].data = filteredData.combined;
+    revenueChart.data.datasets[1].data = filteredData.booked;
+    revenueChart.data.datasets[2].data = filteredData.forecast;
+    revenueChart.data.datasets[3].data = filteredData.expenses;
+    revenueChart.update();
+}
+
+function filterChartDataByDateRange(data) {
+    const startMonth = currentStartDate.getMonth();
+    const endMonth = currentEndDate.getMonth();
+    const startYear = currentStartDate.getFullYear();
+    const endYear = currentEndDate.getFullYear();
+    
+    let result = {
+        labels: [],
+        combined: [],
+        booked: [],
+        forecast: [],
+        expenses: []
+    };
+    
+    // If same year, filter by month
+    if (startYear === endYear && data.year === startYear) {
+        data.months.forEach((month, index) => {
+            if (index >= startMonth && index <= endMonth) {
+                result.labels.push(month);
+                result.combined.push(data.combined?.[index] || 0);
+                result.booked.push(data.booked?.[index] || 0);
+                result.forecast.push(data.forecast?.[index] || 0);
+                result.expenses.push(data.expenses?.[index] || 0);
+            }
+        });
+    } else {
+        // For multi-year or different year, show all data
+        result = {
+            labels: data.months || [],
+            combined: data.combined || [],
+            booked: data.booked || [],
+            forecast: data.forecast || [],
+            expenses: data.expenses || []
+        };
+    }
+    
+    return result;
+}
+
+// User switcher
+function switchUserView(userId) {
+    if (userId) {
+        window.location.href = `/agency/switch-user/?user_id=${userId}`;
+    }
+}
+</script></script>
+{% endblock %}
